@@ -32,24 +32,52 @@ def _yaml_directory():
     return Path(_folder_paths().get_input_directory()) / CATALOGUE_DIR_NAME
 
 
+def _is_catalogue_entry(path):
+    """True when ``path`` is a regular, non-symlink file with a supported
+    catalogue extension — exactly the set the dropdown lists and the loader
+    accepts. Kept in one place so discovery and resolution never diverge."""
+    return (
+        path.is_file()
+        and not path.is_symlink()
+        and path.suffix.lower() in CATALOGUE_EXTENSIONS
+    )
+
+
 def _resolve_catalogue_path(yaml_path):
     """Resolve a relative catalogue filename into a safe absolute path inside the
     catalogue directory.
 
-    Raises ``ValueError`` for a missing/empty name, absolute paths, path
-    traversal, or symbolic links that point outside the catalogue directory.
+    Raises ``ValueError`` for a missing/empty name, absolute or subdirectory
+    paths, path traversal, unsupported extensions, symbolic links, or links that
+    point outside the catalogue directory. A file not on disk is left to fail
+    at the read below with a clear error.
     """
     if yaml_path is None:
         raise ValueError("YAML catalogue file name is required.")
     name = str(yaml_path)
     if not name:
         raise ValueError("YAML catalogue file name is required.")
+
     # Catalogues live directly in the catalogue directory: the workflow-stored
-    # value must be a plain filename, never a (relative or absolute) path.
-    if "/" in name or "\\" in name or name == "." or ".." in name:
+    # value must be a single filename. Any path separator (either OS) makes the
+    # value a path — absolute, subdirectory, or traversal ("./", "../",
+    # "\.", "..\\") — so it is rejected. A filename that merely contains
+    # consecutive dots ("my..file.yaml") has no separator and is allowed.
+    # (On Windows pathlib normalises a leading "\." away, so a parts-based
+    # check would have missed traversal — the raw-separator test does not.)
+    if "/" in name or "\\" in name:
         raise ValueError(f"Invalid YAML catalogue file name: {yaml_path!r}.")
+    if name in (".", ".."):
+        raise ValueError(f"Invalid YAML catalogue file name: {yaml_path!r}.")
+
+    # Discovery and resolution must agree on which files are catalogues:
+    # regular .yaml/.yml files, matched case-insensitively.
+    if Path(name).suffix.lower() not in CATALOGUE_EXTENSIONS:
+        raise ValueError(f"Invalid YAML catalogue file name: {yaml_path!r}.")
+
     yaml_dir = _yaml_directory()
     target = yaml_dir / name
+
     # Resolve symlinks on both ends so a link inside the catalogue directory
     # cannot silently escape it.
     base_real = yaml_dir.resolve()
@@ -59,6 +87,14 @@ def _resolve_catalogue_path(yaml_path):
             f"Invalid YAML catalogue path: {yaml_path!r} points outside "
             f"the catalogue directory."
         )
+
+    # The target must be exactly the kind of entry the dropdown offers: a
+    # regular, non-symlink file. A missing file is left to fail at the read
+    # below with a clear error.
+    if target.is_symlink():
+        raise ValueError(f"Invalid YAML catalogue file name: {yaml_path!r}.")
+    if target.exists() and not _is_catalogue_entry(target):
+        raise ValueError(f"Invalid YAML catalogue file name: {yaml_path!r}.")
     return target
 
 
@@ -72,14 +108,9 @@ def _catalogue_files():
     yaml_dir = _yaml_directory()
     if not yaml_dir.is_dir():
         return []
-    files = [
-        entry.name
-        for entry in yaml_dir.iterdir()
-        if entry.is_file()
-        and not entry.is_symlink()
-        and entry.suffix.lower() in CATALOGUE_EXTENSIONS
-    ]
-    return sorted(files)
+    return sorted(
+        entry.name for entry in yaml_dir.iterdir() if _is_catalogue_entry(entry)
+    )
 
 
 def validate_expression(value):

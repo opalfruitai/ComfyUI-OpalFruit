@@ -5,6 +5,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest.mock import patch
 
 import yaml
 
@@ -59,13 +60,20 @@ class YAMLExpressionTests(unittest.TestCase):
         self._install_fake_folder_paths()
 
     def tearDown(self):
-        sys.modules.pop("folder_paths", None)
         super().tearDown()
 
     def _install_fake_folder_paths(self):
+        """Patch ``folder_paths`` for the duration of the test.
+
+        ``patch.dict`` saves whatever is already in ``sys.modules`` and restores
+        it on teardown, so a real ``folder_paths`` module (host present) is
+        preserved, while a test-only stand-in is cleanly removed.
+        """
         fake = types.ModuleType("folder_paths")
         fake.get_input_directory = lambda: str(self.input_dir)
-        sys.modules["folder_paths"] = fake
+        self._fp_patch = patch.dict(sys.modules, {"folder_paths": fake})
+        self._fp_patch.start()
+        self.addCleanup(self._fp_patch.stop)
 
     def write(self, data, filename=None):
         self.yaml_dir.mkdir(parents=True, exist_ok=True)
@@ -215,11 +223,16 @@ class YAMLExpressionTests(unittest.TestCase):
         self.assertEqual(self.catalogue_files(), self.catalogue_files())
 
     def test_missing_and_empty_catalogue_directory(self):
-        # yaml/ does not exist.
-        self.assertEqual(self.catalogue_files(), [])
-        # yaml/ exists but is empty.
-        self.yaml_dir.mkdir(parents=True, exist_ok=True)
-        self.assertEqual(self.catalogue_files(), [])
+        """The dropdown is empty whether the yaml directory is missing or
+        empty. Both cases are genuinely exercised: setUp creates yaml/, so
+        the missing case removes it first.
+        """
+        with self.subTest("missing directory"):
+            self.yaml_dir.rmdir()
+            self.assertEqual(self.catalogue_files(), [])
+        with self.subTest("empty directory"):
+            self.yaml_dir.mkdir(parents=True)
+            self.assertEqual(self.catalogue_files(), [])
 
     def test_loads_each_selected_file(self):
         data = {
@@ -244,6 +257,36 @@ class YAMLExpressionTests(unittest.TestCase):
             self.assertTrue(name.endswith(".yaml") or name.endswith(".yml"))
             self.assertNotIn("/", name)
             self.assertNotIn("\\", name)
+
+    def test_consecutive_dots_in_filename_resolve(self):
+        """A filename with consecutive dots that is not a traversal component
+        (e.g. 'my..file.yaml') is a valid catalogue file: it is listed and loads.
+        """
+        (self.yaml_dir / "my..file.yaml").write_text(
+            yaml.safe_dump({"seed": 5, "expressions": self.entries}),
+            encoding="utf-8",
+        )
+        self.assertIn("my..file.yaml", self.catalogue_files())
+        entries, seed = self.loader.load("my..file.yaml")
+        self.assertEqual(entries, self.entries)
+        self.assertEqual(seed, 5)
+
+    def test_rejects_unsupported_extension_at_resolution(self):
+        """Resolution rejects extensions the dropdown never offers, not just
+        leaving them out of the list. Case-insensitive .yaml/.yml is accepted.
+        """
+        (self.yaml_dir / "notes.txt").write_text("hi\n", encoding="utf-8")
+        self.assertNotIn("notes.txt", self.catalogue_files())
+        with self.assertRaisesRegex(
+            ValueError, "Invalid YAML catalogue file name"
+        ):
+            self.loader.load("notes.txt")
+        (self.yaml_dir / "upper.YML").write_text(
+            yaml.safe_dump({"seed": 5, "expressions": self.entries}),
+            encoding="utf-8",
+        )
+        self.assertIn("upper.YML", self.catalogue_files())
+        self.loader.load("upper.YML")
 
     # ---------------------------------------------------------------------------
     # Security (FR-03 / security requirements)
@@ -285,6 +328,26 @@ class YAMLExpressionTests(unittest.TestCase):
             self.loader.load("leak.yaml")
         # The dropdown must not list escaping links.
         self.assertNotIn("leak.yaml", self.catalogue_files())
+
+    def test_rejects_symlink_inside_catalogue_directory(self):
+        """A symbolic link that stays inside the directory is rejected at
+        resolution (and at discovery), matching the dropdown which excludes all
+        symlinks.
+        """
+        (self.yaml_dir / "target.yaml").write_text(
+            yaml.safe_dump({"seed": 7, "expressions": [{"expression": "x", "prompt": "p"}]}),
+            encoding="utf-8",
+        )
+        link = self.yaml_dir / "link.yaml"
+        try:
+            link.symlink_to("target.yaml")
+        except OSError:
+            self.skipTest("symbolic link creation unsupported on this platform")
+        self.assertNotIn("link.yaml", self.catalogue_files())
+        with self.assertRaisesRegex(
+            ValueError, "Invalid YAML catalogue file name"
+        ):
+            self.loader.load("link.yaml")
 
     def test_rejects_deleted_or_renamed_catalogue(self):
         self.write({"seed": 1, "expressions": [{"expression": "x", "prompt": "p"}]})
