@@ -3,7 +3,7 @@
 **Date:** 2026-11-24
 **Branch:** `feature/opa-7-yaml-file-selection`
 **Implementation commits:** `f073e05` (original) → `fcdf9df` (review fixes)
-**Status:** Implementation complete; review findings addressed; automated tests pass (37/37); manual acceptance pending (see below).
+**Status:** Implementation complete; review findings addressed; automated tests pass (37/37); manual acceptance passed; PR CI pending.
 
 ## Summary
 
@@ -83,17 +83,19 @@ Engine tests need no ComfyUI and no GPU; V3 node tests run against the host's `c
 - **Workflow storage:** selections now store relative filenames (e.g. `ava.yaml`), so a workflow loads identically across machines that share a catalogue in `input/yaml/`.
 - **Local and remote:** identical behaviour in ComfyUI Desktop, a local web browser and a remote web browser — the browser only picks a name from the dropdown; all directory discovery, file resolution and YAML loading run on the ComfyUI backend. No browser ever sees or touches a filesystem path.
 
-## Outstanding manual acceptance tests (Def of Done)
+## Manual acceptance results (2026-11-24)
 
-These require a live ComfyUI and were not executed from this session:
+User-confirmed live ComfyUI Desktop and remote laptop browser results:
 
-- [ ] Desktop: create `input/yaml/`, add two valid catalogues; confirm both appear in the dropdown.
-- [ ] Desktop: select each catalogue and confirm the correct expressions and seed are returned.
-- [ ] Desktop: modify a catalogue and confirm cache invalidation works.
-- [ ] Desktop: add a third catalogue and verify it appears via ComfyUI's standard refresh (Ctrl+R / refresh).
-- [ ] Save and reload a workflow and confirm the selection persists.
-- [ ] Remote web browser: verify equivalent behaviour to the Desktop checks above.
-- [ ] Verify existing expression-extraction and loop workflows continue to function.
+- [x] Desktop: create `input/yaml/`, add two valid catalogues; confirm both appear in the dropdown.
+- [x] Desktop: select each catalogue and confirm the correct expressions and seed are returned.
+- [x] Desktop: modify a catalogue and confirm cache invalidation works.
+- [x] Desktop: add a third catalogue and verify it appears via ComfyUI's standard refresh (Ctrl+R / refresh).
+- [x] Save and reload a workflow and confirm the selection persists.
+- [x] Remote web browser: verify equivalent behaviour to the Desktop checks above.
+- [x] Verify existing expression-extraction and loop workflows continue to function.
+
+Two workflow configuration issues were resolved during testing: a legacy absolute YAML selection was cleared, and incorrect contact sheet wiring was corrected. No implementation changes were required. CI remains pending.
 
 ## Commit
 
