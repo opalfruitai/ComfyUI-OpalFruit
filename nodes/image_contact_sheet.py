@@ -1,8 +1,88 @@
 """V3 node wrapper for the PIL-only image contact-sheet engine."""
 
+import os
+
+from pathlib import Path
+
 from comfy_api.latest import io
 
 from .contact_sheet import build_contact_sheet
+
+
+def _folder_paths():
+    """Return ComfyUI's ``folder_paths`` module.
+
+    Imported lazily so that this wrapper stays importable in the host-less CI
+    environment. It is required only at execution time, when a relative
+    ``image_directory`` must be anchored to the configured output directory.
+    """
+    import folder_paths
+
+    return folder_paths
+
+
+def _output_root() -> Path:
+    """The canonical absolute directory of ComfyUI's configured output."""
+    return Path(_folder_paths().get_output_directory()).expanduser().resolve()
+
+
+def _resolve_image_directory(image_directory) -> Path:
+    """Resolve the ``image_directory`` input to a canonical absolute path.
+
+    Relative paths are anchored to the configured output directory (via
+    ``folder_paths.get_output_directory()``), never to the process cwd. A
+    relative path that escapes the canonical output root — via ``..``
+    traversal or a symbolic link that points outside — is rejected. On
+    Windows, a non-absolute path that starts with a separator (root-relative,
+    e.g. ``\\subdir`` / ``/subdir``) or references a drive (``C:subdir``,
+    ``C:``) would resolve against the *current* drive/cwd; that is ambiguous
+    and is rejected rather than guessed.
+
+    Explicitly absolute paths are preserved unchanged (even when they point
+    outside the output root) after ``~`` expansion and canonicalisation.
+
+    Raises ``ValueError`` for empty/whitespace-only input, an ambiguous
+    Windows root-/drive-relative path, or a relative path escaping the output
+    root.
+    """
+    text = image_directory
+    if not isinstance(text, str):
+        text = str(text)
+    if not text.strip():
+        raise ValueError("Image directory must be a nonempty path.")
+
+    # Expand ``~`` before classifying, so a home path is seen as absolute.
+    p = Path(text).expanduser()
+
+    if p.is_absolute():
+        # Explicitly absolute (including ``~``-expanded and outside the output
+        # root): canonicalise, but do not constrain to the output root.
+        return p.resolve()
+
+    if os.name == "nt":
+        # A non-absolute Windows path that starts with a separator (drive-
+        # relative root, e.g. ``\subdir`` / ``/subdir``) or references a drive
+        # (e.g. ``C:subdir``) would resolve against the *current* drive/cwd —
+        # ambiguous. Reject it.
+        if text.startswith(("\\", "/")):
+            raise ValueError(
+                f"Cannot resolve root-relative image directory '{text!r}'. "
+                "Provide a full absolute path or a relative path."
+            )
+        if os.path.splitdrive(text)[0]:
+            raise ValueError(
+                f"Cannot resolve drive-relative image directory '{text!r}'. "
+                "Provide a full absolute path or a relative path."
+            )
+
+    root = _output_root()
+    resolved = (root / p).expanduser().resolve()
+    if not resolved.is_relative_to(root):
+        raise ValueError(
+            f"Image directory '{text!r}' resolves outside the configured output "
+            f"directory ('{root}')."
+        )
+    return resolved
 
 
 class ImageContactSheet(io.ComfyNode):
@@ -53,8 +133,9 @@ class ImageContactSheet(io.ComfyNode):
         # The trigger is an execution-order dependency only (e.g. End Loop
         # "outputs"). It is intentionally ignored here; image processing is
         # independent of the value it carries.
+        directory = _resolve_image_directory(image_directory)
         output = build_contact_sheet(
-            image_directory,
+            str(directory),
             filename_pattern=filename_pattern,
             columns=columns,
             thumbnail_width=thumbnail_width,

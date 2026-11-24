@@ -28,7 +28,7 @@ The two YAML nodes work together as a prompt loop. The Image Contact Sheet is co
 
 4. Restart ComfyUI Desktop and search the UI for "YAML Expression Loader", "YAML Expression Extractor", or "Image Contact Sheet".
 
-**Requirements:** Python 3.11+, PyYAML 6.0.3+, Pillow 10.0.0+. ComfyUI itself is the host (it ships the node plumbing); you only install the two Python packages above. The engine tests need no ComfyUI at all; the V3 node unit tests run against a small stand-in when the host is absent, while the separate integration check needs the host's own `comfy_api` — see [Tests](#tests). The contact sheet's folder input still takes a plain path (relative to the machine running ComfyUI; absolute paths are recommended and `~` is supported); the YAML Expression Loader instead uses a dropdown that selects from the configured `input/yaml/` directory — see [Catalogue file selection](#catalogue-file-selection) below.
+**Requirements:** Python 3.11+, PyYAML 6.0.3+, Pillow 10.0.0+. ComfyUI itself is the host (it ships the node plumbing); you only install the two Python packages above. The engine tests need no ComfyUI at all; the V3 node unit tests run against a small stand-in when the host is absent, while the separate integration check needs the host's own `comfy_api` — see [Tests](#tests). The contact sheet's `image_directory` input takes a plain path: a relative value is resolved against ComfyUI's configured output directory (and is kept inside it), while an absolute path — including one with `~` — is used as-is, even when it points outside that directory. The YAML Expression Loader instead uses a dropdown that selects from the configured `input/yaml/` directory — see [Catalogue file selection](#catalogue-file-selection) below.
 
 ## Node: YAML Expression Loader
 
@@ -100,7 +100,7 @@ It accepts exactly one entry of the form `{"expression": "happy", "prompt": "A h
 
 | Input | Default | What it does |
 | --- | --- | --- |
-| `image_directory` | (empty) | Folder containing the source images. |
+| `image_directory` | (empty) | Folder containing the source images. A relative path resolves against the configured output directory; an absolute path (or a `~` path) is used as-is, even when it points outside that directory. |
 | `filename_pattern` | (`*.png`) | Filename glob selecting which files to include, in that one folder only (not recursive). |
 | `columns` | (`4`) | Number of square tiles across, at least 1. |
 | `thumbnail_width` | (`256`) | Width **and** height, in pixels, of each image area. |
@@ -108,6 +108,8 @@ It accepts exactly one entry of the form `{"expression": "happy", "prompt": "A h
 | `background_colour` | (`#808080`) | Opaque Pillow colour name or hex for empty cells. |
 | `output_filename` | (`contact-sheet.png`) | Plain PNG filename written into `image_directory`. |
 | `trigger` | (unconnected) | Optional any-type dependency hook — connect `End Loop`'s `outputs` to run the sheet after a loop. The value it carries is ignored. |
+
+> **Path resolution.** A relative `image_directory` is resolved against ComfyUI's *configured output directory* at run time (the host's `folder_paths.get_output_directory()`), never against the process cwd. `..` traversal and a symbolic link that points outside that output root are rejected with a clear error, as are Windows root-/drive-relative paths (`\subdir`, `/subdir`, `C:subdir`). This is a path-resolution safeguard, **not** a filesystem sandbox: explicit absolute paths (including those outside the output directory, and `~`) remain fully supported and are used as-is.
 
 **Example 1 — a one-off sheet (no loop).**
 
