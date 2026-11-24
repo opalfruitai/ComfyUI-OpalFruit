@@ -21,9 +21,6 @@ Added module-level helpers and rewired `execute`:
   importable in the host-less CI environment; the host API is only required
   at execution time, when a relative path must be anchored.
 - `_output_root()` — `Path(folder_paths.get_output_directory()).expanduser().resolve()`.
-- `_within_root(path, root)` — containment check for resolved absolute paths;
-  case-insensitive on Windows (NTFS semantics), case-sensitive `is_relative_to`
-  on Unix.
 - `_resolve_image_directory(image_directory)` — the new contract:
   - Rejects empty/whitespace-only input with a clear `ValueError`.
   - Expands `~` *before* classification, so home paths are treated as absolute.
@@ -82,6 +79,12 @@ restored by `addCleanup` (same pattern as `tests/test_yaml_expressions.py`):
   semantics (relative → configured output directory; absolute/`~` → used as-is,
   even outside the output directory).
 
+> **Independent-review correction.** Applied in the follow-up commit on the same
+> branch: the redundant `_within_root()` helper and its string-based case
+> folding were removed, and output-root containment is now checked directly with
+> `resolved.is_relative_to(root)` — `pathlib` already provides native Windows
+> path comparison semantics. The "Decisions" section reflects the final choice.
+
 ## Test results
 
 **Command** (from the repository root, environment with `requirements.txt`):
@@ -93,14 +96,15 @@ python -m unittest discover -s tests -v
 **Result:**
 
 ```
-Ran 47 tests in 0.270s
+Ran 47 tests in 0.262s
 
 OK
 ```
 
 All 47 tests pass — 10 new `ContactSheetPathResolutionTests` plus all existing
 engine and wrapper tests remain green. No failures, no errors, no skips on this
-run.
+run. The run is recorded at the final state, after the independent-review
+correction; it reproduces the identical 47/47 result.
 
 **Platform notes (run on Windows, `win32`/PowerShell):**
 
@@ -126,8 +130,10 @@ run.
 3. **Canonicalisation.** The output root and every candidate path are resolved
    with `expanduser().resolve()` before the containment decision; the root is
    the canonical output directory, not the process cwd.
-4. **Windows case-insensitive containment.** NTFS is case-insensitive, so
-   `_within_root` falls back to a lowercased containment check on `os.name == "nt"`.
+4. **Native path containment.** Containment is checked directly with
+   `resolved.is_relative_to(root)`; `pathlib` already provides native Windows
+   path comparison semantics (case-insensitive on case-insensitive filesystems),
+   so no extra helper or string-based case folding is needed.
 5. **Reject Windows ambiguity rather than guess.** Non-absolute root-relative
    (`\subdir`, `/subdir`) and drive-relative (`C:subdir`, `C:`) paths would
    resolve against the *current* drive/cwd; they are rejected with a clear error.

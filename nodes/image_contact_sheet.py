@@ -26,22 +26,6 @@ def _output_root() -> Path:
     return Path(_folder_paths().get_output_directory()).expanduser().resolve()
 
 
-def _within_root(path: Path, root: Path) -> bool:
-    """True when ``path`` is ``root`` or inside it.
-
-    ``path`` and ``root`` are resolved absolute paths. Windows filesystems are
-    case-insensitive, so on Windows the containment check is case-insensitive;
-    on Unix ``is_relative_to`` is case-sensitive and already correct.
-    """
-    if path.is_relative_to(root):
-        return True
-    if os.name == "nt":
-        rp = str(path).lower()
-        rr = str(root).lower()
-        return rp == rr or rp.startswith(rr + os.sep)
-    return False
-
-
 def _resolve_image_directory(image_directory) -> Path:
     """Resolve the ``image_directory`` input to a canonical absolute path.
 
@@ -93,7 +77,7 @@ def _resolve_image_directory(image_directory) -> Path:
 
     root = _output_root()
     resolved = (root / p).expanduser().resolve()
-    if not _within_root(resolved, root):
+    if not resolved.is_relative_to(root):
         raise ValueError(
             f"Image directory '{text!r}' resolves outside the configured output "
             f"directory ('{root}')."
