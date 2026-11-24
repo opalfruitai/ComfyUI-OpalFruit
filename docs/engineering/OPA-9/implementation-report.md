@@ -2,7 +2,7 @@
 
 ## Status
 
-- **In progress — pending manual acceptance** (not marked Done).
+- **Manual acceptance passed — pending PR/CI and merge** (not marked Done).
 - **Branch:** `fix/opa-9-contact-sheet-path-resolution`
 - **Approved:** 2026-11-24
 - **Issue:** https://linear.app/opalfruitai/issue/OPA-9/investigate-image-contact-sheet-directory-resolution-failure
@@ -158,16 +158,16 @@ correction; it reproduces the identical 47/47 result.
 - Symlink-escape test is platform-aware and skips where symlink creation is
   unavailable.
 
-## Pending manual acceptance (user)
+## Manual acceptance — passed 2026-11-24
 
-Per the approved brief, the following remain for the user:
+The user explicitly confirmed all five acceptance tests passed in ComfyUI Desktop and remote browser.
 
-1. Restore the original relative workflow input and retain the End Loop trigger.
-2. Generate a sheet in the configured shared output directory; verify expected
+- [x] Restore the original relative workflow input and retain the End Loop trigger.
+- [x] Generate a sheet in the configured shared output directory; verify expected
    source images and output.
-3. Repeat with fresh images and verify the sheet updates.
-4. Repeat from a remote browser and confirm absolute path compatibility.
-5. Confirm no YAML selection regression.
+- [x] Repeat with fresh images and verify the sheet updates.
+- [x] Repeat from a remote browser and confirm absolute path compatibility.
+- [x] Confirm no YAML selection regression.
 
 ## Audit
 
