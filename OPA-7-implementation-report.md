@@ -1,7 +1,7 @@
 # OPA-7 — Implementation Report: Native YAML File Selection
 
 **Date:** 2026-11-24
-**Branch:** `darrenmilnes/opa-7-improve-yaml-file-selection-in-comfyui`
+**Branch:** `feature/opa-7-yaml-file-selection`
 **Implementation commits:** `f073e05` (original) → `fcdf9df` (review fixes)
 **Status:** Implementation complete; review findings addressed; automated tests pass (37/37); manual acceptance pending (see below).
 
@@ -104,4 +104,4 @@ f073e05 Add native file dropdown for YAML Expression Loader catalogue
 fcdf9df Consistent catalogue discovery/resolution, robust folder_paths mocking
 ```
 
-Branch: `darrenmilnes/opa-7-improve-yaml-file-selection-in-comfyui` — not merged into `main`, per the brief.
+Branch: `feature/opa-7-yaml-file-selection` — not merged into `main`, per the brief.
