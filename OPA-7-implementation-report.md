@@ -2,8 +2,8 @@
 
 **Date:** 2026-11-24
 **Branch:** `darrenmilnes/opa-7-improve-yaml-file-selection-in-comfyui`
-**Implementation commit:** `f073e05`
-**Status:** Implementation complete; automated tests pass; manual acceptance pending (see below).
+**Implementation commits:** `f073e05` (original) → `fcdf9df` (review fixes)
+**Status:** Implementation complete; review findings addressed; automated tests pass (37/37); manual acceptance pending (see below).
 
 ## Summary
 
@@ -19,13 +19,32 @@ Replaced the free-text YAML file path widget in the `YAMLExpressionLoader` node 
 - **Preserved behaviour (FR-04 / FR-05).** YAML catalogue structure, validation rules, expression ordering, case-insensitive duplicate detection, seed handling, output names/types, list-output behaviour (`OUTPUT_IS_LIST = (True, False)`), SHA-256 content-based cache invalidation via `IS_CHANGED`, and the `YAMLExpressionExtractor` were all kept unchanged. Node name, category, input identifier and node registration are unchanged.
 - **No unrestricted absolute-path access** was added as a compatibility workaround; old absolute paths are rejected by design.
 
+## Review findings (second pass) and changes
+
+An implementation review raised three findings, each fixed in `fcdf9df`:
+
+1. **Discovery and resolution must agree.** Discovery (the dropdown) filtered out unsupported extensions and symbolic links, but resolution did not — a workflow could still store an unsupported extension or a symlink name and only fail at read. Both paths now share a single `_is_catalogue_entry()` predicate (regular, non-symlink, `.yaml`/`.yml` case-insensitive), and `_resolve_catalogue_path()` checks the extension and symlinks as well. A subtle regression was caught while doing this: pathlib normalises a Windows-leading `.\` away (`Path(".\outer.yaml").parts == ("outer.yaml",)`), so the interim parts-based traversal check missed `.\` traversal. Name validation now rejects any path separator (`/` or `\`, both OSes) plus exact `.`/`..`, and a filename with consecutive dots (`my..file.yaml`) — no separator — resolves successfully, as the review required.
+2. **`test_missing_and_empty_catalogue_directory` was only testing one case.** Because `setUp` always creates `yaml/`, the "missing" branch never ran. It now removes the directory with `rmdir()` for the missing case and exercises both missing and empty directories under `subTest`.
+3. **Test mocking must preserve and restore the real `folder_paths` module.** Tests now use `unittest.mock.patch.dict(sys.modules, {"folder_paths": fake})`, which saves whatever module (or absence) is present and restores it on teardown, instead of overwriting and deleting `folder_paths` from `sys.modules`.
+
+Regression tests added: a consecutive-dots filename is listed and loads; an unsupported extension is rejected at resolution (not just omitted from the dropdown); an in-directory symbolic link is rejected at both discovery and resolution.
+
 ## Files changed
+
+### Original implementation (`f073e05`)
 
 | File | Change |
 | --- | --- |
-| `nodes/yaml_expressions.py` | Free-text `yaml_path` → native file dropdown; added `_folder_paths()`, `_yaml_directory()`, `_resolve_catalogue_path()`, `_catalogue_files()`; `load`/`IS_CHANGED` use the shared resolver. (+94 lines, −2) |
-| `tests/test_yaml_expressions.py` | Rewritten for the new contract: mocked `folder_paths.get_input_directory()` over per-test temp dirs; new discovery/ordering/exclusion/missing-dir/selection/security/rejection tests. (+188, −31) |
+| `nodes/yaml_expressions.py` | Free-text `yaml_path` → native file dropdown; added `_folder_paths()`, `_yaml_directory()`, `_resolve_catalogue_path()`, `_catalogue_files()`; `load`/`IS_CHANGED` use the shared resolver. |
+| `tests/test_yaml_expressions.py` | Rewritten for the new contract: mocked `folder_paths.get_input_directory()` over per-test temp dirs; new discovery/ordering/exclusion/missing-dir/selection/security/rejection tests. |
 | `README.md` | Updated requirements line, example catalogue location, added a "Catalogue file selection" section (directory, refresh, local/remote behaviour, migration) and a validation rule. |
+
+### Review fixes (`fcdf9df`, +113 / −19)
+
+| File | Change |
+| --- | --- |
+| `nodes/yaml_expressions.py` | Added shared `_is_catalogue_entry()` predicate so discovery and resolution reject the same files (extensions and symlinks now checked at resolution); separator-based name validation that rejects any `/` or `\` plus exact `.`/`..` while still allowing consecutive-dot filenames. (+55, −7) |
+| `tests/test_yaml_expressions.py` | Mocked `folder_paths` via `patch.dict` (preserves/restores the real module); fixed missing/empty-dir test to exercise both cases under `subTest`; added regression tests for consecutive-dot filenames, unsupported-extension rejection at resolution, and in-directory symlink rejection. (+77, −4) |
 
 ## Automated test results
 
@@ -36,11 +55,11 @@ python -m unittest discover -s tests -v
 ```
 
 ```
-Ran 34 tests in 0.194s
+Ran 37 tests in 0.214s
 OK
 ```
 
-All 34 tests pass with zero skips. New coverage (per the brief):
+All 37 tests pass with zero skips. Coverage (per the brief, plus review regressions):
 
 - Discovery of `.yaml` and `.yml` files (case-insensitive).
 - Exclusion of unsupported files and subdirectories.
@@ -48,7 +67,9 @@ All 34 tests pass with zero skips. New coverage (per the brief):
 - Missing and empty catalogue directories.
 - Correct resolution and loading of each selected file.
 - Rejection of absolute paths and path traversal (incl. Windows-style `\\`).
-- Rejection of filesystem links escaping the catalogue directory (graceful `skipTest` where the platform cannot create symlinks).
+- Rejection of unsupported extensions at resolution (not just omission from the dropdown).
+- Resolution of valid filenames with consecutive dots (`my..file.yaml`).
+- Rejection of filesystem links escaping the catalogue directory (graceful `skipTest` where the platform cannot create symlinks), and rejection of in-directory symlinks at resolution.
 - Handling of deleted or renamed catalogues.
 - Existing YAML validation behaviour and cache invalidation on content change.
 - Package registration (node schema, categories, function callables).
@@ -76,10 +97,11 @@ These require a live ComfyUI and were not executed from this session:
 
 ## Commit
 
-Implementation commit (this report is a separate follow-up commit):
+Implementation commits (this report is a separate follow-up commit):
 
 ```
 f073e05 Add native file dropdown for YAML Expression Loader catalogue
+fcdf9df Consistent catalogue discovery/resolution, robust folder_paths mocking
 ```
 
 Branch: `darrenmilnes/opa-7-improve-yaml-file-selection-in-comfyui` — not merged into `main`, per the brief.
