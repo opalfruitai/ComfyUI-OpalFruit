@@ -1,8 +1,11 @@
 from pathlib import Path
 import importlib.util
+import os
 import sys
 import tempfile
+import types
 import unittest
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -29,7 +32,10 @@ def _install_comfy_api_stub():
 _install_comfy_api_stub()
 
 from nodes.contact_sheet import LABEL_HEIGHT, build_contact_sheet, filename_label
-from nodes.image_contact_sheet import ImageContactSheet
+from nodes.image_contact_sheet import (
+    ImageContactSheet,
+    _resolve_image_directory,
+)
 
 
 class ImageContactSheetTests(unittest.TestCase):
@@ -251,6 +257,124 @@ class ContactSheetNodeTests(unittest.TestCase):
                 datas.append(sheet.convert("RGB").tobytes())
         self.assertEqual(datas[0], datas[1])
         self.assertEqual(datas[0], datas[2])
+
+
+class ContactSheetPathResolutionTests(unittest.TestCase):
+    """Relative-path resolution in the V3 wrapper, anchored to a configured
+    output root that is distinct from the process cwd."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        # The configured output root: distinct from cwd and from ``outside``.
+        self.output_root = self.root / "output"
+        self.output_root.mkdir(parents=True, exist_ok=True)
+        # A real sibling directory OUTSIDE the output root: used as a
+        # legitimate absolute path and as a symlink escape target.
+        self.outside = self.root / "outside"
+        self.outside.mkdir(parents=True, exist_ok=True)
+
+        fake = types.ModuleType("folder_paths")
+        fake.get_output_directory = lambda: str(self.output_root)
+        self._fp_patch = patch.dict(sys.modules, {"folder_paths": fake})
+        self._fp_patch.start()
+        self.addCleanup(self._fp_patch.stop)
+
+        self.node = ImageContactSheet()
+
+    def img(self, directory, name):
+        directory = Path(directory)
+        directory.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (20, 20), "red").save(directory / name)
+
+    def sheet(self, image_directory, **kwargs):
+        """Run the node and return the path of the written sheet."""
+        kwargs.setdefault("output_filename", "contact-sheet.png")
+        return Path(self.node.execute(str(image_directory), **kwargs)[0])
+
+    def test_root_dot_resolves_to_output_root(self):
+        self.img(self.output_root, "a.png")
+        out = self.sheet(".")
+        self.assertEqual(out, self.output_root / "contact-sheet.png")
+        self.assertTrue(out.exists())
+
+    def test_relative_nested_resolves_under_output_root(self):
+        self.img(self.output_root / "sub" / "deep", "b.png")
+        out = self.sheet("sub/deep")
+        self.assertEqual(
+            out, self.output_root / "sub" / "deep" / "contact-sheet.png"
+        )
+        self.assertTrue(out.exists())
+
+    def test_generated_sheet_lands_in_intended_dir_not_cwd(self):
+        self.img(self.output_root / "results", "one.png")
+        out = self.sheet("results")
+        expected = self.output_root / "results" / "contact-sheet.png"
+        self.assertEqual(out, expected)
+        self.assertTrue(out.exists())
+        # It must not have fallen back to the process cwd.
+        self.assertNotIn(os.getcwd(), str(expected))
+
+    def test_absolute_outside_output_is_preserved(self):
+        self.img(self.outside, "c.png")
+        out = self.sheet(str(self.outside))
+        self.assertEqual(out, self.outside / "contact-sheet.png")
+        self.assertEqual(out, (self.outside / "contact-sheet.png").resolve())
+        # The output root itself must remain untouched.
+        self.assertFalse(self.output_root.joinpath("contact-sheet.png").exists())
+
+    def test_home_expansion_treated_as_absolute(self):
+        result = _resolve_image_directory("~/contact_images")
+        expected = Path(os.path.expanduser("~")) / "contact_images"
+        self.assertTrue(result.is_absolute())
+        self.assertEqual(result.resolve(), expected.resolve())
+
+    def test_empty_and_whitespace_rejected(self):
+        for bad in ("", "   ", "\n", "\t"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(
+                ValueError, "nonempty"
+            ):
+                _resolve_image_directory(bad)
+
+    def test_missing_directory_rejected(self):
+        with self.assertRaisesRegex(ValueError, "does not exist"):
+            self.sheet("nope/dontexist")
+
+    def test_traversal_escape_rejected(self):
+        for bad in ("../..", "sub/../../..", "../"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(
+                ValueError, "outside the configured output"
+            ):
+                _resolve_image_directory(bad)
+
+    def test_symlink_escape_rejected(self):
+        link = self.output_root / "leak"
+        try:
+            os.symlink(self.outside, link)
+        except OSError:
+            self.skipTest("cannot create symbolic links on this platform")
+        def _cleanup():
+            if link.is_symlink() or link.exists():
+                link.unlink()
+
+        self.addCleanup(_cleanup)
+        with self.assertRaisesRegex(
+            ValueError, "outside the configured output"
+        ):
+            _resolve_image_directory("leak")
+
+    def test_windows_root_and_drive_relative_rejected(self):
+        # Only *non-absolute* root-/drive-relative values are rejected.
+        # An absolute path such as ``D:\\subdir`` is a separate, preserved
+        # case (see test_absolute_outside_output_is_preserved).
+        if os.name != "nt":
+            self.skipTest("Windows-only path semantics")
+        for bad in ("\\subdir", "/subdir", "C:subdir", "C:"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(
+                ValueError, "Cannot resolve"
+            ):
+                _resolve_image_directory(bad)
 
 
 if __name__ == "__main__":
