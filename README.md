@@ -28,13 +28,13 @@ The two YAML nodes work together as a prompt loop. The Image Contact Sheet is co
 
 4. Restart ComfyUI Desktop and search the UI for "YAML Expression Loader", "YAML Expression Extractor", or "Image Contact Sheet".
 
-**Requirements:** Python 3.11+, PyYAML 6.0.3+, Pillow 10.0.0+. ComfyUI itself is the host (it ships the node plumbing); you only install the two Python packages above. The engine tests need no ComfyUI at all; the V3 node unit tests run against a small stand-in when the host is absent, while the separate integration check needs the host's own `comfy_api` — see [Tests](#tests). Paths are relative to the machine running ComfyUI; absolute paths are recommended and `~` is supported.
+**Requirements:** Python 3.11+, PyYAML 6.0.3+, Pillow 10.0.0+. ComfyUI itself is the host (it ships the node plumbing); you only install the two Python packages above. The engine tests need no ComfyUI at all; the V3 node unit tests run against a small stand-in when the host is absent, while the separate integration check needs the host's own `comfy_api` — see [Tests](#tests). The contact sheet's folder input still takes a plain path (relative to the machine running ComfyUI; absolute paths are recommended and `~` is supported); the YAML Expression Loader instead uses a dropdown that selects from the configured `input/yaml/` directory — see [Catalogue file selection](#catalogue-file-selection) below.
 
 ## Node: YAML Expression Loader
 
 **In plain language.** You prepare a text file listing several prompts. This box reads that file and gives you one *list* (every prompt) and one *number* (the seed). Feed the list into a ComfyUI Start Loop and the loop runs your generation/save body once per line. Wire the seed to your generation nodes so every run is reproducible.
 
-**Example catalogue.** Save the file below as `expressions.yaml` somewhere your computer can read:
+**Example catalogue.** Save the file below as `expressions.yaml` in the `yaml` subdirectory of ComfyUI's configured input directory (`input/yaml/`):
 
 ```yaml
 seed: 12345
@@ -44,6 +44,15 @@ expressions:
   - expression: thoughtful
     prompt: "A thoughtful portrait, soft lighting"
 ```
+
+### Catalogue file selection
+
+The loader's `yaml_path` input is a native ComfyUI file dropdown. It lists every `.yaml`/`.yml` file (extensions matched case-insensitively) **directly** in that directory, in alphabetical order; subdirectories and other file types are excluded. If `input/yaml/` does not exist yet or is empty, the dropdown is simply empty — there is no error to deal with.
+
+- **Where the directory lives.** It is `input/yaml/` under whatever folder your ComfyUI installation uses for input (on Desktop this is the configured ComfyUI input directory; on a server it is the folder the backend was started with, or the default). The node finds it through ComfyUI's own folder API at runtime, so it works with any configured layout and no extra setting exists.
+- **Refresh.** The list is rebuilt whenever the node schema is refreshed. Dropping a new catalogue into `input/yaml/` and using ComfyUI's standard refresh (Ctrl+R / refresh) makes it appear in the dropdown. Deleting or renaming one removes it from the list; an old selection then raises a clear error when you queue, pointing at the missing file.
+- **Workflows store relative filenames.** Selecting `ava.yaml` saves `ava.yaml` — not the full path — in the workflow. That is what makes the same workflow load identically in **ComfyUI Desktop, a local web browser, and a remote web browser**: the browser only picks a name from the dropdown; all directory discovery, file resolution and YAML loading happen on the ComfyUI backend. No browser ever sees or touches a filesystem path.
+- **Migration from older workflows.** Pre-change workflows stored an absolute path in `yaml_path`. To migrate one: move the catalogue file into `input/yaml/`, reselect it in the dropdown, and save the workflow. The loader now accepts only plain filenames inside that directory: absolute paths, `..` traversal, and symbolic links that resolve outside `input/yaml/` are all rejected with a clear error rather than following the path.
 
 **Intended wiring (a text view of the UI):**
 
@@ -66,6 +75,7 @@ loop body result                   --> End Loop
 - Expression names must be unique, compared case-insensitively (`happy`, `Happy`, `HAPPY` all collide).
 - Quote values that YAML would otherwise read as numbers or booleans.
 - File contents are hashed for caching, so editing the file forces a fresh read even if the file timestamp is unchanged.
+- The selected file is validated before loading: it must be a plain filename directly in `input/yaml/`; absolute paths, `..` traversal, and symlinks that resolve outside that directory raise a clear error instead of following the path.
 - The box declares list output for `expressions` and scalar output for `seed` (`OUTPUT_IS_LIST = (True, False)`). Do **not** wrap the returned list in another list or enable `INPUT_IS_LIST` on the extractor — the list is already shaped correctly for the loop.
 
 ## Node: YAML Expression Extractor
